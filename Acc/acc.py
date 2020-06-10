@@ -3,12 +3,11 @@ import numpy as np
 import os
 
 def compute_acc(path_img, path_label):
-    img = Image.open(path_img)
+    img = np.load(path_img).astype(int)
     #img.show()
     label = Image.open(path_label)
-    img = np.array(img)
     #print(img[250])
-    label = np.array(label)
+    label = (np.array(label) / 255).astype(int)
     #print(label[250])
     TP = 0
     TN = 0
@@ -36,9 +35,9 @@ all_FP = 0
 all_FN = 0
 
 
-for name in range(os.listdir("img")):
+for name in os.listdir("img"):
     img_file = os.path.join("img/%s" % name)
-    label_file = os.path.join("label/%s" % name)
+    label_file = os.path.join("label/%s" % name.split('.')[0] + '.png')
     TN, TP, FP, FN = compute_acc(img_file, label_file)
     all_TN = all_TN + TN
     all_TP = all_TP + TP

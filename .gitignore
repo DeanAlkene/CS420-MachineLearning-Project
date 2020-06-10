@@ -2,3 +2,5 @@ __pycache__
 data
 isbi
 UNetpp/saved_model
+Acc/img
+Acc/label

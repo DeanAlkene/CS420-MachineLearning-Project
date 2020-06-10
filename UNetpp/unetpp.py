@@ -322,6 +322,7 @@ def test(val_dataloaders, save_predict=False):
             plt.imshow(Image.open(mask_path[0]), cmap='Greys_r')
             if save_predict == True:
                 plt.savefig(dir + '/' + mask_path[0].split('/')[-1])
+                np.save(dir + '/' + mask_path[0].split('/')[-1], predict)
             print('iou={},dice={}'.format(iou, dice))
             if i < num:
                 i += 1
