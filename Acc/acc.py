@@ -5,7 +5,7 @@ import os
 def compute_acc(path_img, path_label):
     img = np.load(path_img).astype(int)
     #img.show()
-    label = Image.open(path_label)
+    label = Image.open(path_label).convert('L')
     #print(img[250])
     label = (np.array(label) / 255).astype(int)
     #print(label[250])
