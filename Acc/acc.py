@@ -3,11 +3,14 @@ import numpy as np
 import os
 
 def compute_acc(path_img, path_label):
-    img = np.load(path_img).astype(int)
+'''
+    Calculate pixel accuracy for a single test image
+'''
+    img = np.load(path_img).astype(int) # Load prediction image
     #img.show()
-    label = Image.open(path_label).convert('L')
+    label = Image.open(path_label).convert('L') # Convert label image to grayscale image
     #print(img[250])
-    label = (np.array(label) / 255).astype(int)
+    label = (np.array(label) / 255).astype(int) # Normalize and convert to int for later calculation
     #print(label[250])
     TP = 0
     TN = 0

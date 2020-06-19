@@ -3,6 +3,9 @@ import os
 
 
 def loss_plot(epochs, loss):
+    '''
+        Draw loss curve and save as figure
+    '''
     num = epochs
     x = [i for i in range(num)]
     plot_save_path = r'result/plot/'
@@ -16,6 +19,9 @@ def loss_plot(epochs, loss):
 
 
 def metrics_plot(epochs, name, *args):
+    '''
+        Draw metric value curve and save as figure
+    '''
     num = epochs
     names = name.split('&')
     metrics_value = args

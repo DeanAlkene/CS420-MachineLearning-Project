@@ -6,39 +6,11 @@ from skimage.io import imread
 import imageio
 
 
-class IOUMetric:
-    """
-    Class to calculate mean-iou using fast_hist method
-    """
-
-    def __init__(self, num_classes):
-        self.num_classes = num_classes
-        self.hist = np.zeros((num_classes, num_classes))
-
-    def _fast_hist(self, label_pred, label_true):
-        mask = (label_true >= 0) & (label_true < self.num_classes)
-        hist = np.bincount(
-            self.num_classes * label_true[mask].astype(int) +
-            label_pred[mask], minlength=self.num_classes ** 2).reshape(self.num_classes, self.num_classes)
-        return hist
-
-    def add_batch(self, predictions, gts):
-        for lp, lt in zip(predictions, gts):
-            self.hist += self._fast_hist(lp.flatten(), lt.flatten())
-
-    def evaluate(self):
-        acc = np.diag(self.hist).sum() / self.hist.sum()
-        acc_cls = np.diag(self.hist) / self.hist.sum(axis=1)
-        acc_cls = np.nanmean(acc_cls)
-        iu = np.diag(self.hist) / (self.hist.sum(axis=1) +
-                                   self.hist.sum(axis=0) - np.diag(self.hist))
-        mean_iu = np.nanmean(iu)
-        freq = self.hist.sum(axis=1) / self.hist.sum()
-        fwavacc = (freq[freq > 0] * iu[freq > 0]).sum()
-        return acc, acc_cls, iu, mean_iu, fwavacc
-
-
 def get_iou(mask_name, predict):
+    '''
+        Calculate IOU metric value between label and prediction
+    '''
+    # load label
     image_mask = cv2.imread(mask_name, 0)
     if np.all(image_mask == None):
         image_mask = imageio.mimread(mask_name)
@@ -47,15 +19,13 @@ def get_iou(mask_name, predict):
     height = predict.shape[0]
     weight = predict.shape[1]
 
-    o = 0
+    # Covert pixel values of both prediction and label to 0/1
     for row in range(height):
         for col in range(weight):
             if predict[row, col] < 0.5:
                 predict[row, col] = 0
             else:
                 predict[row, col] = 1
-            if predict[row, col] == 0 or predict[row, col] == 1:
-                o += 1
     height_mask = image_mask.shape[0]
     weight_mask = image_mask.shape[1]
     for row in range(height_mask):
@@ -64,22 +34,25 @@ def get_iou(mask_name, predict):
                 image_mask[row, col] = 0
             else:
                 image_mask[row, col] = 1
-            if image_mask[row, col] == 0 or image_mask[row, col] == 1:
-                o += 1
     predict = predict.astype(np.int16)
 
+    # compute intersection areas between prediction and label
     interArea = np.multiply(predict, image_mask)
     tem = predict + image_mask
-    unionArea = tem - interArea
+    unionArea = tem - interArea  # compute union areas between prediction and label
     inter = np.sum(interArea)
     union = np.sum(unionArea)
-    iou_tem = inter / union
+    iou_tem = inter / union  # IOU = intersection / union
     print('%s:iou=%f' % (mask_name, iou_tem))
 
     return iou_tem
 
 
 def get_dice(mask_name, predict):
+    '''
+        Calculate DICE metric value between label and prediction
+    '''
+    # load label
     image_mask = cv2.imread(mask_name, 0)
     if np.all(image_mask == None):
         image_mask = imageio.mimread(mask_name)
@@ -87,15 +60,14 @@ def get_dice(mask_name, predict):
         image_mask = cv2.resize(image_mask, (576, 576))
     height = predict.shape[0]
     weight = predict.shape[1]
-    o = 0
+
+    # Covert pixel values of both prediction and label to 0/1
     for row in range(height):
         for col in range(weight):
             if predict[row, col] < 0.5:
                 predict[row, col] = 0
             else:
                 predict[row, col] = 1
-            if predict[row, col] == 0 or predict[row, col] == 1:
-                o += 1
     height_mask = image_mask.shape[0]
     weight_mask = image_mask.shape[1]
     for row in range(height_mask):
@@ -104,32 +76,34 @@ def get_dice(mask_name, predict):
                 image_mask[row, col] = 0
             else:
                 image_mask[row, col] = 1
-            if image_mask[row, col] == 0 or image_mask[row, col] == 1:
-                o += 1
     predict = predict.astype(np.int16)
+    # compute intersection areas between prediction and label
     intersection = (predict*image_mask).sum()
+    # DICE = 2 * intersection / total
     dice = (2. * intersection) / (predict.sum()+image_mask.sum())
     return dice
 
 
 def get_hd(mask_name, predict):
+    '''
+        Calculate hausdorff distance between label and prediction
+    '''
+    # load label
     image_mask = cv2.imread(mask_name, 0)
     if np.all(image_mask == None):
         image_mask = imageio.mimread(mask_name)
         image_mask = np.array(image_mask)[0]
         image_mask = cv2.resize(image_mask, (576, 576))
 
+    # Covert pixel values of both prediction and label to 0/1
     height = predict.shape[0]
     weight = predict.shape[1]
-    o = 0
     for row in range(height):
         for col in range(weight):
             if predict[row, col] < 0.5:
                 predict[row, col] = 0
             else:
                 predict[row, col] = 1
-            if predict[row, col] == 0 or predict[row, col] == 1:
-                o += 1
     height_mask = image_mask.shape[0]
     weight_mask = image_mask.shape[1]
     for row in range(height_mask):
@@ -138,8 +112,8 @@ def get_hd(mask_name, predict):
                 image_mask[row, col] = 0
             else:
                 image_mask[row, col] = 1
-            if image_mask[row, col] == 0 or image_mask[row, col] == 1:
-                o += 1
+
+    # compute hausdorff distance in both orders and output the larger one
     hd1 = directed_hausdorff(image_mask, predict)[0]
     hd2 = directed_hausdorff(predict, image_mask)[0]
     res = None
@@ -152,6 +126,9 @@ def get_hd(mask_name, predict):
 
 
 def show(predict):
+    '''
+        Show the predicted image
+    '''
     height = predict.shape[0]
     weight = predict.shape[1]
     for row in range(height):

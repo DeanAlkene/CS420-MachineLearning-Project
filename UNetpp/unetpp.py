@@ -27,13 +27,18 @@ EPOCHS = 100
 BATCH_SIZE = 4
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 x_transforms = transforms.Compose([
-    transforms.ToTensor(),  # -> [0,1]
-    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # ->[-1,1]
+    transforms.ToTensor(),  # pixel value -> [0,1]
+    transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+                         )  # pixel value ->[-1,1]
 ])
-y_transforms = transforms.ToTensor()
+y_transforms = transforms.ToTensor()  # Just convert label to tensor
 
 
 class IsbiCellDataset:
+    '''
+        The data set for DataLoader
+    '''
+
     def __init__(self, state, transform=None, target_transform=None):
         self.state = state
         self.aug = True
@@ -42,15 +47,20 @@ class IsbiCellDataset:
         self.mask_paths = None
         self.train_img_paths, self.val_img_paths, self.test_img_paths = None, None, None
         self.train_mask_paths, self.val_mask_paths, self.test_mask_paths = None, None, None
+        # get image and label correspond to self.state
         self.pics, self.masks = self.getDataPath()
         self.transform = transform
         self.target_transform = target_transform
 
     def getDataPath(self):
+        '''
+            Get all the images and labels
+        '''
         self.train_img_paths = glob(self.root + r'/train/images/*')
         self.train_mask_paths = glob(self.root + r'/train/label/*')
         self.val_img_paths = glob(self.root + r'/test/images/*')
         self.val_mask_paths = glob(self.root + r'/test/label/*')
+        # Validation set is the same as test set
         self.test_img_paths, self.test_mask_paths = self.val_img_paths, self.val_mask_paths
         assert self.state == 'train' or self.state == 'val' or self.state == 'test'
         if self.state == 'train':
@@ -61,10 +71,15 @@ class IsbiCellDataset:
             return self.test_img_paths, self.test_mask_paths
 
     def __getitem__(self, index):
-        pic_path = self.pics[index]
+        '''
+            override [] operation
+            read and convert image and label
+        '''
+        pic_path = self.pics[index]  # get certain image and label paths according to index
         mask_path = self.masks[index]
         pic = cv2.imread(pic_path)
         mask = cv2.imread(mask_path, cv2.COLOR_BGR2GRAY)
+        # convert image and label to grayscale images then perform transformations
         pic = pic.astype('float32') / 255
         mask = mask.astype('float32') / 255
         if self.transform is not None:
@@ -78,6 +93,11 @@ class IsbiCellDataset:
 
 
 class DoubleConv(nn.Module):
+    '''
+        A module that consists of two convolutional layers
+        Will be used in U-Net++
+    '''
+
     def __init__(self, in_ch, out_ch):
         super(DoubleConv, self).__init__()
         self.conv = nn.Sequential(
@@ -95,13 +115,19 @@ class DoubleConv(nn.Module):
 
 class NestedUNet(nn.Module):
     def __init__(self, in_channel, out_channel):
+        '''
+            Definition of blocks in U-Net++
+            self.convi_j represents the j-th convolutional blocks in the top i-th pathway of the pyramid
+            self.final_i represents the output of uppermost four convolutional blocks mentioned in deep supervision
+            For the detailed illustration, please refer to our report
+        '''
         super().__init__()
 
-        nb_filter = [32, 64, 128, 256, 512]
+        nb_filter = [32, 64, 128, 256, 512]  # filter sizes
 
         self.pool = nn.MaxPool2d(2, 2)
         self.up = nn.Upsample(
-            scale_factor=2, mode='bilinear', align_corners=True)
+            scale_factor=2, mode='bilinear', align_corners=True)  # Up-sampling block using bilinear interpolation
 
         self.conv0_0 = DoubleConv(in_channel, nb_filter[0])
         self.conv1_0 = DoubleConv(nb_filter[0], nb_filter[1])
@@ -130,26 +156,40 @@ class NestedUNet(nn.Module):
         self.final4 = nn.Conv2d(nb_filter[0], out_channel, kernel_size=1)
 
     def forward(self, input):
+        '''
+            The forward process
+            Showing the network architecture
+        '''
         x0_0 = self.conv0_0(input)
-        x1_0 = self.conv1_0(self.pool(x0_0))
+        x1_0 = self.conv1_0(self.pool(x0_0))  # result of down-sampling
+        # output of a block in the top skip pathway that concatenates output from conv0_0 and up-sampled output from conv1_0
         x0_1 = self.conv0_1(torch.cat([x0_0, self.up(x1_0)], 1))
 
-        x2_0 = self.conv2_0(self.pool(x1_0))
+        x2_0 = self.conv2_0(self.pool(x1_0))  # conv1_0->conv2_0
+        # conv1_0+conv2_0->conv1_1
         x1_1 = self.conv1_1(torch.cat([x1_0, self.up(x2_0)], 1))
+        # conv0_0+conv0_1+conv1_1->conv0_2
         x0_2 = self.conv0_2(torch.cat([x0_0, x0_1, self.up(x1_1)], 1))
 
-        x3_0 = self.conv3_0(self.pool(x2_0))
+        x3_0 = self.conv3_0(self.pool(x2_0))  # conv2_0->conv3_0
+        # conv2_0+conv3_0->conv2_1
         x2_1 = self.conv2_1(torch.cat([x2_0, self.up(x3_0)], 1))
+        # conv1_0+conv1_1+conv2_1->conv1_2
         x1_2 = self.conv1_2(torch.cat([x1_0, x1_1, self.up(x2_1)], 1))
+        # conv0_0+conv0_1+conv0_2+conv1_2->conv0_3
         x0_3 = self.conv0_3(torch.cat([x0_0, x0_1, x0_2, self.up(x1_2)], 1))
 
-        x4_0 = self.conv4_0(self.pool(x3_0))
+        x4_0 = self.conv4_0(self.pool(x3_0))  # conv3_0->conv4_0
+        # conv3_0+conv4_0->conv3_1
         x3_1 = self.conv3_1(torch.cat([x3_0, self.up(x4_0)], 1))
+        # conv2_0+conv2_1+conv3_1->conv2_2
         x2_2 = self.conv2_2(torch.cat([x2_0, x2_1, self.up(x3_1)], 1))
+        # conv1_0+conv1_1+conv1_2+conv2_2->conv1_3
         x1_3 = self.conv1_3(torch.cat([x1_0, x1_1, x1_2, self.up(x2_2)], 1))
         x0_4 = self.conv0_4(
-            torch.cat([x0_0, x0_1, x0_2, x0_3, self.up(x1_3)], 1))
+            torch.cat([x0_0, x0_1, x0_2, x0_3, self.up(x1_3)], 1))  # conv0_0+conv0_1+conv0_2+conv0_3+conv1_3->conv0_4
 
+        # final outputs
         output1 = self.final1(x0_1)
         output1 = self.sigmoid(output1)
         output2 = self.final2(x0_2)
@@ -159,10 +199,13 @@ class NestedUNet(nn.Module):
         output4 = self.final4(x0_4)
         output4 = self.sigmoid(output4)
 
-        return [output1, output2, output3, output4]
+        return [output1, output2, output3, output4]  # deep supervision output
 
 
 def getLog():
+    '''
+        log training & testing process
+    '''
     filename = './log.log'
     logging.basicConfig(
         filename=filename,
@@ -173,11 +216,17 @@ def getLog():
 
 
 def getModel():
+    '''
+        Get U-Net++ model
+    '''
     model = NestedUNet(3, 1).to(device)
     return model
 
 
 def getDataset():
+    '''
+        Get training, validation and testing datasets in the form of torch.utils.data.DataLoader
+    '''
     train_dataloaders, val_dataloaders, test_dataloaders = None, None, None
     train_dataset = IsbiCellDataset(
         r'train', transform=x_transforms, target_transform=y_transforms)
@@ -192,23 +241,30 @@ def getDataset():
 
 
 def val(model, best_iou, val_dataloaders):
-    model = model.eval()
+    '''
+        Validation process during training
+    '''
+    model = model.eval()  # set model to evaluation mode
     with torch.no_grad():
         i = 0
         miou_total = 0
         hd_total = 0
         dice_total = 0
         num = len(val_dataloaders)
-        for x, _, pic, mask in val_dataloaders:
+        for x, _, pic, mask in val_dataloaders:  # for each image and label in the validation set
             x = x.to(device)
             y = model(x)
+            # predict using U-Net++ and use the last output of deep supervision as the prediction
             img_y = torch.squeeze(y[-1]).cpu().numpy()
 
+            # caculate hausdorff distance, iou and dice scores by comparing prediction and label
             hd_total += get_hd(mask[0], img_y)
             miou_total += get_iou(mask[0], img_y)
             dice_total += get_dice(mask[0], img_y)
             if i < num:
                 i += 1
+
+        # calculate average scores and log them in the log file
         aver_iou = miou_total / num
         aver_hd = hd_total / num
         aver_dice = dice_total/num
@@ -216,6 +272,8 @@ def val(model, best_iou, val_dataloaders):
               (aver_iou, aver_hd, aver_dice))
         logging.info('Miou=%f,aver_hd=%f,aver_dice=%f' %
                      (aver_iou, aver_hd, aver_dice))
+
+        # save best model
         if aver_iou > best_iou:
             print('aver_iou:{} > best_iou:{}'.format(aver_iou, best_iou))
             logging.info('aver_iou:{} > best_iou:{}'.format(
@@ -228,6 +286,9 @@ def val(model, best_iou, val_dataloaders):
 
 
 def train(model, criterion, optimizer, train_dataloader, val_dataloader, epochs, threshold):
+    '''
+        Training process
+    '''
     best_iou, aver_iou, aver_dice, aver_hd = 0, 0, 0, 0
     num_epochs = epochs
     threshold = threshold
@@ -236,22 +297,22 @@ def train(model, criterion, optimizer, train_dataloader, val_dataloader, epochs,
     dice_list = []
     hd_list = []
     for epoch in range(num_epochs):
-        model = model.train()
+        model = model.train()  # set model to training mode
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         logging.info('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
         dt_size = len(train_dataloader.dataset)
         epoch_loss = 0
         step = 0
-        for x, y, _, mask in train_dataloader:
+        for x, y, _, mask in train_dataloader:  # for each images and labels in training set
             step += 1
             inputs = x.to(device)
             labels = y.to(device)
-            # zero the parameter gradients
-            optimizer.zero_grad()
-            outputs = model(inputs)
+
+            optimizer.zero_grad()  # zero the parameter gradients
+            outputs = model(inputs)  # get the four outputs of deep supervision
             loss = 0
-            for output in outputs:
+            for output in outputs:  # implementing accuarate mode: average loss values of outputs of deep supervision as the final loss
                 loss += criterion(output, labels)
             loss /= len(outputs)
             if threshold != None:
@@ -260,7 +321,7 @@ def train(model, criterion, optimizer, train_dataloader, val_dataloader, epochs,
                     optimizer.step()
                     epoch_loss += loss.item()
             else:
-                loss.backward()
+                loss.backward()  # optimization step
                 optimizer.step()
                 epoch_loss += loss.item()
 
@@ -270,6 +331,7 @@ def train(model, criterion, optimizer, train_dataloader, val_dataloader, epochs,
                                                      train_dataloader.batch_size + 1, loss.item()))
         loss_list.append(epoch_loss)
 
+        # validate the model
         best_iou, aver_iou, aver_dice, aver_hd = val(
             model, best_iou, val_dataloader)
         iou_list.append(aver_iou)
@@ -278,12 +340,18 @@ def train(model, criterion, optimizer, train_dataloader, val_dataloader, epochs,
         print("epoch %d loss:%0.3f" % (epoch, epoch_loss))
         logging.info("epoch %d loss:%0.3f" % (epoch, epoch_loss))
     loss_plot(num_epochs, loss_list)
+
+    # plot training process
     metrics_plot(num_epochs, 'iou&dice', iou_list, dice_list)
     metrics_plot(num_epochs, 'hd', hd_list)
     return model
 
 
 def test(val_dataloaders, save_predict=False):
+    '''
+        Test process
+    '''
+    # load model parameters
     logging.info('final test........')
     if save_predict == True:
         dir = r'./saved_predict'
@@ -299,17 +367,20 @@ def test(val_dataloaders, save_predict=False):
         hd_total = 0
         dice_total = 0
         num = len(val_dataloaders)
-        for pic, _, pic_path, mask_path in val_dataloaders:
+        for pic, _, pic_path, mask_path in val_dataloaders:  # for each image and label in the validation set
             pic = pic.to(device)
             predict = model(pic)
+            # predict using U-Net++ and use the last output of deep supervision as the prediction
             predict = torch.squeeze(predict[-1]).cpu().numpy()
 
+            # caculate hausdorff distance, iou and dice scores by comparing prediction and label
             iou = get_iou(mask_path[0], predict)
             miou_total += iou
             hd_total += get_hd(mask_path[0], predict)
             dice = get_dice(mask_path[0], predict)
             dice_total += dice
 
+            # plot the prediction label
             fig = plt.figure()
             ax1 = fig.add_subplot(1, 3, 1)
             ax1.set_title('input')
@@ -340,8 +411,8 @@ if __name__ == '__main__':
     print('**************************')
     model = getModel()
     train_dataloaders, val_dataloaders, test_dataloaders = getDataset()
-    criterion = torch.nn.BCELoss()
-    optimizer = optim.Adam(model.parameters())
-    # train(model, criterion, optimizer,
-    # train_dataloaders, val_dataloaders, EPOCHS, None)
+    criterion = torch.nn.BCELoss()  # using BCELoss
+    optimizer = optim.Adam(model.parameters())  # using Adam
+    train(model, criterion, optimizer,
+          train_dataloaders, val_dataloaders, EPOCHS, None)
     test(test_dataloaders, save_predict=True)
